@@ -247,7 +247,7 @@ async function getStream(type, id) {
         // Episode
         // We assume a similar pattern for episodes. 
         // Based on scraping, shows use /shows/details/...
-        url = `${BASE_URL}/shows/details/video/${realId}`;
+        url = `${BASE_URL}/shows/watch/video/${realId}`;
     }
 
     console.log(`Fetching stream from: ${url}`);
@@ -292,9 +292,59 @@ async function getStream(type, id) {
     }
 }
 
+/**
+ * Search for a series and get a specific episode ID
+ * @param {string} seriesId - The xalaflix series ID (e.g., 'xalaflix:series:123')
+ * @param {number} seasonNum - Season number
+ * @param {number} episodeNum - Episode number
+ * @returns {string|null} - Episode ID or null if not found
+ */
+async function searchAndGetEpisode(seriesId, seasonNum, episodeNum) {
+    try {
+        // Get the series metadata which includes all episodes
+        const meta = await getMeta('series', seriesId);
+
+        if (!meta || !meta.videos || meta.videos.length === 0) {
+            console.log('No episodes found for series:', seriesId);
+            return null;
+        }
+
+        console.log(`Series has ${meta.videos.length} episodes`);
+
+        // Find the matching episode
+        const episode = meta.videos.find(ep =>
+            ep.season === seasonNum && ep.episode === episodeNum
+        );
+
+        if (episode) {
+            console.log(`Found episode: ${episode.title} (${episode.id})`);
+            return episode.id;
+        }
+
+        // Try fuzzy matching - sometimes episode numbers might be off by one or have different formats
+        const fuzzyEpisode = meta.videos.find(ep => {
+            // Check if it's in the right season and close to the episode number
+            return ep.season === seasonNum && Math.abs(ep.episode - episodeNum) <= 1;
+        });
+
+        if (fuzzyEpisode) {
+            console.log(`Found fuzzy match: ${fuzzyEpisode.title} (${fuzzyEpisode.id})`);
+            return fuzzyEpisode.id;
+        }
+
+        console.log(`Episode S${seasonNum}E${episodeNum} not found in series`);
+        return null;
+
+    } catch (e) {
+        console.error('Error in searchAndGetEpisode:', e.message);
+        return null;
+    }
+}
+
 module.exports = {
     getCatalog,
     search,
     getMeta,
-    getStream
+    getStream,
+    searchAndGetEpisode
 };
