@@ -43,6 +43,7 @@ async function getCatalog(type, page = 1) {
                 // Better title extraction?
                 // Visual check suggests title is often in an h3 or just text inside the anchor.
                 // Subagent said: "Title: a span"
+                const titleText = el.find('h3').text().trim() || el.find('.entry-title').text().trim() || title;
                 // Clean up title: Remove extra whitespace and known badges
                 let titleClean = titleText.replace(/\s+/g, ' ').trim();
                 // Heuristic: Remove "TOP 50" prefix if present (common badge)
