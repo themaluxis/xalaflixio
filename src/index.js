@@ -8,7 +8,7 @@ const app = express();
 const addonRouter = getRouter(addonInterface);
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-const REFERER = 'https://xalaflix.io/';
+const REFERER = 'https://purstream.me/';
 
 // Proxy Endpoint
 app.get('/proxy', async (req, res) => {
@@ -19,7 +19,7 @@ app.get('/proxy', async (req, res) => {
     const headers = {
         'User-Agent': USER_AGENT,
         'Referer': REFERER,
-        'Origin': 'https://xalaflix.io'
+        'Origin': 'https://purstream.me'
     };
 
     // Forward Range header if present

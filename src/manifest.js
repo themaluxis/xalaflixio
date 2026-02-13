@@ -1,23 +1,23 @@
 module.exports = {
-    id: 'org.xalaflix.addon',
-    version: '1.0.0',
-    name: 'XalaFlix',
-    description: 'Watch Movies & TV Shows from XalaFlix',
+    id: 'org.purstream.addon',
+    version: '2.0.0',
+    name: 'Purstream',
+    description: 'Watch Movies & TV Shows from Purstream',
     resources: ['catalog', 'meta', 'stream'],
     types: ['movie', 'series'],
     catalogs: [
         {
             type: 'movie',
-            id: 'xalaflix_movies',
-            name: 'XalaFlix Movies',
+            id: 'purstream_movies',
+            name: 'Purstream Movies',
             extra: [{ name: 'search', isRequired: false }, { name: 'skip', isRequired: false }]
         },
         {
             type: 'series',
-            id: 'xalaflix_series',
-            name: 'XalaFlix Series',
+            id: 'purstream_series',
+            name: 'Purstream Series',
             extra: [{ name: 'search', isRequired: false }, { name: 'skip', isRequired: false }]
         }
     ],
-    idPrefixes: ['xalaflix', 'tt']
+    idPrefixes: ['purstream', 'tt']
 };

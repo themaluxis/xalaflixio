@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { addonBuilder } = require('stremio-addon-sdk');
-const { getCatalog, getMeta, getStream, search, searchAndGetEpisode } = require('./lib/xalaflix');
+const { getCatalog, getMeta, getStream, search, searchAndGetEpisode } = require('./lib/purstream');
+const frenchStream = require('./lib/frenchstream');
 
 const manifest = require('./manifest');
 const builder = new addonBuilder(manifest);
@@ -114,25 +115,25 @@ builder.defineMetaHandler(async ({ type, id }) => {
 builder.defineStreamHandler(async ({ type, id }) => {
     console.log('Stream Request:', type, id);
 
-    // Parse the ID - could be:
-    // - tt1234567 (IMDB movie)
-    // - tt1234567:1:5 (IMDB series, season 1, episode 5)
-    // - xalaflix:movie:123
-    // - xalaflix:series:123
-    // - xalaflix:episode:456
+    // Handle direct purstream/frenchstream IDs first
+    if (id.startsWith('purstream:')) {
+        const streams = await getStream(type, id);
+        return { streams: streams };
+    }
 
-    let xalaflixId = id;
-    let season = null;
-    let episode = null;
+    if (id.startsWith('frenchstream:')) {
+        const streams = await frenchStream.getStream(type, id);
+        return { streams: streams };
+    }
 
-    // Check if it's an IMDB ID
+    // Parse IMDB ID
     if (id.startsWith('tt')) {
-        // Parse IMDB ID - might include season:episode for series
         const parts = id.split(':');
         const imdbId = parts[0];
+        let season = null;
+        let episode = null;
 
         if (parts.length >= 3) {
-            // Series episode: tt1234567:1:5
             season = parseInt(parts[1]);
             episode = parseInt(parts[2]);
         }
@@ -140,8 +141,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
         console.log(`Resolving IMDB ID: ${imdbId}${season ? ` S${season}E${episode}` : ''}`);
 
         try {
-            // 1. Get Meta from Cinemeta to find the Title
-            // For episodes, we need the parent series metadata
+            // Get metadata from Cinemeta
             const metaType = type === 'series' ? 'series' : 'movie';
             const metaUrl = `https://v3-cinemeta.strem.io/meta/${metaType}/${imdbId}.json`;
             const { data } = await axios.get(metaUrl);
@@ -155,10 +155,8 @@ builder.defineStreamHandler(async ({ type, id }) => {
             const title = meta.name;
             const year = meta.releaseInfo ? meta.releaseInfo.substring(0, 4) : '';
 
-            // Collect all possible title variations to search
+            // Collect title variations
             const titlesToTry = [title];
-
-            // Add AKA titles if available (Cinemeta sometimes includes these)
             if (meta.slug) {
                 const slugTitle = meta.slug.replace(/-/g, ' ');
                 if (slugTitle.toLowerCase() !== title.toLowerCase()) {
@@ -166,60 +164,99 @@ builder.defineStreamHandler(async ({ type, id }) => {
                 }
             }
 
-            // Try searching with progressively simpler title variations
-            let match = null;
-            let searchResults = [];
             const targetType = type === 'series' ? 'series' : 'movie';
+            let purstreamMatch = null;
+            let frenchStreamMatch = null;
 
+            // Search both sources
             for (const searchTitle of titlesToTry) {
-                console.log(`Searching Xalaflix for: "${searchTitle}" (${year})`);
-                searchResults = await search(searchTitle);
-                console.log(`Found ${searchResults.length} search results`);
+                console.log(`Searching for: "${searchTitle}" (${year})`);
 
-                if (searchResults.length > 0) {
-                    match = findBestMatch(searchResults, title, targetType, year);
-                    if (match) break;
+                // Search Purstream
+                const purstreamResults = await search(searchTitle);
+                console.log(`Found ${purstreamResults.length} Purstream results`);
 
-                    // Also try matching against the current search title
-                    match = findBestMatch(searchResults, searchTitle, targetType, year);
-                    if (match) break;
+                if (purstreamResults.length > 0) {
+                    purstreamMatch = findBestMatch(purstreamResults, title, targetType, year);
+                    if (!purstreamMatch) {
+                        purstreamMatch = findBestMatch(purstreamResults, searchTitle, targetType, year);
+                    }
                 }
+
+                // Search French Stream
+                const frenchStreamResults = await frenchStream.search(searchTitle);
+                console.log(`Found ${frenchStreamResults.length} FrenchStream results`);
+
+                if (frenchStreamResults.length > 0) {
+                    frenchStreamMatch = findBestMatch(frenchStreamResults, title, targetType, year);
+                    if (!frenchStreamMatch) {
+                        frenchStreamMatch = findBestMatch(frenchStreamResults, searchTitle, targetType, year);
+                    }
+                }
+
+                if (purstreamMatch || frenchStreamMatch) break;
             }
 
-            // If still no match, try with just the first word (for single-word titles)
-            if (!match && title.split(' ').length <= 3) {
+            // Try simple search if no match
+            if (!purstreamMatch && !frenchStreamMatch && title.split(' ').length <= 3) {
                 const simpleTitle = title.split(' ')[0];
                 console.log(`Trying simple search with: "${simpleTitle}"`);
-                searchResults = await search(simpleTitle);
-                console.log(`Found ${searchResults.length} search results`);
 
-                if (searchResults.length > 0) {
-                    match = findBestMatch(searchResults, title, targetType, year);
+                const purstreamResults = await search(simpleTitle);
+                const frenchStreamResults = await frenchStream.search(simpleTitle);
+
+                console.log(`Found ${purstreamResults.length} Purstream, ${frenchStreamResults.length} FrenchStream results`);
+
+                if (purstreamResults.length > 0) {
+                    purstreamMatch = findBestMatch(purstreamResults, title, targetType, year);
+                }
+                if (frenchStreamResults.length > 0) {
+                    frenchStreamMatch = findBestMatch(frenchStreamResults, title, targetType, year);
                 }
             }
 
-            if (match) {
-                console.log(`Found match: "${match.name}" (${match.id}) with score`);
+            // Collect streams from all sources
+            const allStreams = [];
+
+            // Get Purstream streams
+            if (purstreamMatch) {
+                console.log(`Found Purstream match: "${purstreamMatch.name}" (${purstreamMatch.id})`);
 
                 if (type === 'series' && season !== null && episode !== null) {
-                    // For series, we need to find the specific episode
-                    console.log(`Looking for S${season}E${episode}...`);
-                    const episodeId = await searchAndGetEpisode(match.id, season, episode);
+                    console.log(`Looking for S${season}E${episode} on Purstream...`);
+                    const episodeId = await searchAndGetEpisode(purstreamMatch.id, season, episode);
 
                     if (episodeId) {
                         console.log(`Found episode: ${episodeId}`);
-                        xalaflixId = episodeId;
+                        const streams = await getStream(type, episodeId);
+                        allStreams.push(...streams);
                     } else {
-                        console.log('Episode not found on Xalaflix');
-                        return { streams: [] };
+                        console.log('Episode not found on Purstream');
                     }
                 } else {
-                    xalaflixId = match.id;
+                    const streams = await getStream(type, purstreamMatch.id);
+                    allStreams.push(...streams);
                 }
-            } else {
-                console.log('No match found on Xalaflix');
+            }
+
+            // Get French Stream streams
+            if (frenchStreamMatch) {
+                console.log(`Found FrenchStream match: "${frenchStreamMatch.name}" (${frenchStreamMatch.id})`);
+
+                try {
+                    const fsStreams = await frenchStream.getStream(type, frenchStreamMatch.id);
+                    allStreams.push(...fsStreams);
+                } catch (e) {
+                    console.error('Error getting FrenchStream streams:', e.message);
+                }
+            }
+
+            if (allStreams.length === 0) {
+                console.log('No streams found from any source');
                 return { streams: [] };
             }
+
+            return { streams: allStreams };
 
         } catch (e) {
             console.error('Error resolving IMDB ID:', e.message);
@@ -227,8 +264,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
         }
     }
 
-    const streams = await getStream(type, xalaflixId);
-    return { streams: streams };
+    return { streams: [] };
 });
 
 module.exports = builder.getInterface();
